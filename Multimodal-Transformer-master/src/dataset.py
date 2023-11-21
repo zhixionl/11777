@@ -36,8 +36,6 @@ class Multimodal_Datasets(Dataset):
         self.context_v = dataset[split_type]['context_v'] if 'context_v' in dataset[split_type].keys() else None
 
         self.data = data
-        self.text_dim = self.text.shape[0]
-        self.vision_dim = self.vision.shape[0]
         
         self.n_modalities = 3 # vision/ text/ audio
     def get_n_modalities(self):
@@ -55,8 +53,7 @@ class Multimodal_Datasets(Dataset):
         X = (index, self.text[index], self.audio[index], self.vision[index])
         Y = self.labels[index]
         META = (0,0,0) if self.meta is None else (self.meta[index][0], self.meta[index][1], self.meta[index][2])
-        text_dim = self.text_dim
-        vision_dim = self.vision_dim
+        text_dim, audio_dim, vision_dim = self.get_dim()
         
         context_t = np.zeros([1,text_dim]) if self.context_t is None else self.context_t[index]
         context_v = np.zeros([1,vision_dim]) if self.context_v is None else self.context_v[index]
