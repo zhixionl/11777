@@ -25,6 +25,32 @@ from src.eval_metrics import *
 #
 ####################################################################
 
+  # define adapator 
+class Adaptor(nn.Module):
+    def __init__(self, ndim, rank=32):
+        
+        super().__init__()
+        self.conv = nn.Conv1d(in_channels = ndim, out_channels = 30, kernel_size=1, padding=0, bias=False)
+        self.rank = rank
+        self.down_proj = nn.Linear(ndim, rank)
+        self.dropout = nn.Dropout(p=0.1)
+        self.up_proj = nn.Linear(rank, ndim)
+        nn.init.normal_(self.down_proj.weight, std = 1/rank)
+        nn.init.zeros_(self.up_proj.weight)
+
+    def forward(self, input):
+        # import pdb; pdb.set_trace()
+        input =  input.transpose(1, 2)
+        down_projection = self.down_proj(input)
+        #down_projection = self.dropout(down_projection)
+        up_projection = self.up_proj(down_projection)
+        up_projection = self.dropout(up_projection)
+        sum_projection = up_projection + input 
+
+        sum_projection = sum_projection.transpose(1, 2)
+        
+        return self.conv(sum_projection)
+
 def get_CTC_module(hyp_params):
     a2l_module = getattr(ctc, 'CTCModule')(in_dim=hyp_params.orig_d_a, out_seq_len=hyp_params.l_len)
     v2l_module = getattr(ctc, 'CTCModule')(in_dim=hyp_params.orig_d_v, out_seq_len=hyp_params.l_len)
@@ -34,6 +60,37 @@ def initiate(hyp_params, train_loader, valid_loader, test_loader):
     model = getattr(models, hyp_params.model+'Model')(hyp_params)
     if hyp_params.use_cuda:
         model = model.cuda()
+
+    fine_tune = True
+    freeze = True
+    #import pdb; pdb.set_trace()
+
+
+    if fine_tune:
+        model = load_model(hyp_params, name=hyp_params.name)
+        # Freeze all parameters
+        if freeze:
+            for param in model.parameters():
+                param.requires_grad = False
+        
+
+        # finetune the output layer 
+        model.proj1 = nn.Linear(in_features=180, out_features=180, bias=True)    # hard code here (to be fixed !)
+        model.proj2 = nn.Linear(in_features=180, out_features=180, bias=True)
+        model.out_layer = nn.Linear(in_features=180, out_features=1, bias=True)
+
+        # update the conv1d with "LoRA"
+
+        #prev_weight = model.proj_a.weight
+        #import pdb; pdb.set_trace()
+        adaptor_v = Adaptor(ndim = hyp_params.orig_d_v)
+        adaptor_a = Adaptor(ndim = hyp_params.orig_d_a)
+        adaptor_l = Adaptor(ndim = hyp_params.orig_d_l)
+    
+        model.proj_v = adaptor_v
+        model.proj_a = adaptor_a
+        model.proj_l = adaptor_l
+    
 
     optimizer = getattr(optim, hyp_params.optim)(model.parameters(), lr=hyp_params.lr)
     criterion = getattr(nn, hyp_params.criterion)()
@@ -60,6 +117,9 @@ def initiate(hyp_params, train_loader, valid_loader, test_loader):
                 'ctc_v2l_optimizer': ctc_v2l_optimizer,
                 'ctc_criterion': ctc_criterion,
                 'scheduler': scheduler}
+    torch.cuda.empty_cache()
+    import gc
+    gc.collect()
     return train_model(settings, hyp_params, train_loader, valid_loader, test_loader)
 
 
@@ -81,7 +141,8 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
     ctc_criterion = settings['ctc_criterion']
     
     scheduler = settings['scheduler']
-    
+
+   
 
     def train(model, optimizer, criterion, ctc_a2l_module, ctc_v2l_module, ctc_a2l_optimizer, ctc_v2l_optimizer, ctc_criterion):
         epoch_loss = 0
@@ -89,7 +150,9 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
         num_batches = hyp_params.n_train // hyp_params.batch_size
         proc_loss, proc_size = 0, 0
         start_time = time.time()
+        #prev_weights = None
         for i_batch, (batch_X, batch_Y, batch_META) in enumerate(train_loader):
+            #import pdb; pdb.set_trace()
             sample_ind, text, audio, vision = batch_X
             eval_attr = batch_Y.squeeze(-1)   # if num of labels is 1
             
@@ -186,17 +249,22 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
                 
         return epoch_loss / hyp_params.n_train
 
-    def evaluate(model, ctc_a2l_module, ctc_v2l_module, criterion, test=False):
+    def evaluate(model, ctc_a2l_module, ctc_v2l_module, criterion, test=False, last_test=False):
         model.eval()
         loader = test_loader if test else valid_loader
         total_loss = 0.0
     
         results = []
         truths = []
+        return_index = []
 
         with torch.no_grad():
             for i_batch, (batch_X, batch_Y, batch_META) in enumerate(loader):
+                
                 sample_ind, text, audio, vision = batch_X
+                #import pdb; pdb.set_trace()
+                if last_test:
+                    return_index.append(batch_META[0])
                 eval_attr = batch_Y.squeeze(dim=-1) # if num of labels is 1
             
                 if hyp_params.use_cuda:
@@ -223,35 +291,42 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
                 # Collect the results into dictionary
                 results.append(preds)
                 truths.append(eval_attr)
-                
+        #('preds', preds)
+        #print('truths', truths)
         avg_loss = total_loss / (hyp_params.n_test if test else hyp_params.n_valid)
 
         results = torch.cat(results)
         truths = torch.cat(truths)
-        return avg_loss, results, truths
 
+        return avg_loss, results, truths, return_index
+    #model = load_model(hyp_params, name=hyp_params.name)
+    #_, results, truths, video_index = evaluate(model, ctc_a2l_module, ctc_v2l_module, criterion, test=True, last_test=True)
+    #import pdb; pdb.set_trace()
     best_valid = 1e8
+    prev_weights = model.proj1.weight
     for epoch in tqdm(range(1, hyp_params.num_epochs+1)):
+        #import pdb; pdb.set_trace()
+        #prev_weights = model.proj_v.down_proj.weight
         start = time.time()
-        train(model, optimizer, criterion, ctc_a2l_module, ctc_v2l_module, ctc_a2l_optimizer, ctc_v2l_optimizer, ctc_criterion)
-        val_loss, _, _ = evaluate(model, ctc_a2l_module, ctc_v2l_module, criterion, test=False)
-        test_loss, _, _ = evaluate(model, ctc_a2l_module, ctc_v2l_module, criterion, test=True)
+        train_loss = train(model, optimizer, criterion, ctc_a2l_module, ctc_v2l_module, ctc_a2l_optimizer, ctc_v2l_optimizer, ctc_criterion)
         
+        val_loss, _, _, _ = evaluate(model, ctc_a2l_module, ctc_v2l_module, criterion, test=False)
+        test_loss, _, _, _ = evaluate(model, ctc_a2l_module, ctc_v2l_module, criterion, test=True)
         end = time.time()
         duration = end-start
         scheduler.step(val_loss)    # Decay learning rate by validation loss
 
         print("-"*50)
-        print('Epoch {:2d} | Time {:5.4f} sec | Valid Loss {:5.4f} | Test Loss {:5.4f}'.format(epoch, duration, val_loss, test_loss))
+        print('Epoch {:2d} | Time {:5.4f} sec | Valid Loss {:5.4f} | Test Loss {:5.4f} | Train Loss {:5.4f}'.format(epoch, duration, val_loss, test_loss, train_loss))
         print("-"*50)
         
         if val_loss < best_valid:
             print(f"Saved model at pre_trained_models/{hyp_params.name}.pt!")
             save_model(hyp_params, model, name=hyp_params.name)
             best_valid = val_loss
-
+    #import pdb; pdb.set_trace()
     model = load_model(hyp_params, name=hyp_params.name)
-    _, results, truths = evaluate(model, ctc_a2l_module, ctc_v2l_module, criterion, test=True)
+    _, results, truths, video_index = evaluate(model, ctc_a2l_module, ctc_v2l_module, criterion, test=True, last_test=True)
 
     if hyp_params.dataset == "mosei_senti":
         eval_mosei_senti(results, truths, True)
@@ -259,8 +334,16 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
         eval_mosi(results, truths, True)
     elif hyp_params.dataset == 'iemocap':
         eval_iemocap(results, truths)
+    elif hyp_params.dataset == 'mustard_ind':
+        eval_mustard(results, truths, video_index)
     elif hyp_params.dataset == 'mustard':
-        eval_mustard(results, truths)
+        eval_mustard(results, truths, video_index)
+    elif hyp_params.dataset == 'mustard_w_context':
+        eval_mustard(results, truths, video_index)
+    elif hyp_params.dataset == 'mustard_dep_t_context':
+        eval_mustard(results, truths, video_index)
+    else:
+        eval_mustard(results, truths, video_index)
 
     sys.stdout.flush()
     input('[Press Any Key to start another run]')
