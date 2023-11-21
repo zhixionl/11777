@@ -32,8 +32,12 @@ class Multimodal_Datasets(Dataset):
         
         # Note: this is STILL an numpy array
         self.meta = dataset[split_type]['id'] if 'id' in dataset[split_type].keys() else None
-       
+        self.context_t = dataset[split_type]['context_t'] if 'context_t' in dataset[split_type].keys() else None
+        self.context_v = dataset[split_type]['context_v'] if 'context_v' in dataset[split_type].keys() else None
+
         self.data = data
+        self.text_dim = self.text.shape[0]
+        self.vision_dim = self.vision.shape[0]
         
         self.n_modalities = 3 # vision/ text/ audio
     def get_n_modalities(self):
@@ -51,9 +55,18 @@ class Multimodal_Datasets(Dataset):
         X = (index, self.text[index], self.audio[index], self.vision[index])
         Y = self.labels[index]
         META = (0,0,0) if self.meta is None else (self.meta[index][0], self.meta[index][1], self.meta[index][2])
+        text_dim = self.text_dim
+        vision_dim = self.vision_dim
+        
+        context_t = np.zeros([1,text_dim]) if self.context_t is None else self.context_t[index]
+        context_v = np.zeros([1,vision_dim]) if self.context_v is None else self.context_v[index]
+        
+        CONTEXT = (context_t, context_v)
+
         if self.data == 'mosi':
             META = (self.meta[index][0].decode('UTF-8'), self.meta[index][1].decode('UTF-8'), self.meta[index][2].decode('UTF-8'))
         if self.data == 'iemocap':
             Y = torch.argmax(Y, dim=-1)
-        return X, Y, META        
+        
+        return X, Y, META, CONTEXT
 
