@@ -58,10 +58,14 @@ def initiate(hyp_params, train_loader, valid_loader, test_loader):
 
         #prev_weight = model.proj_a.weight
         #import pdb; pdb.set_trace()
-        adaptor_v = Adaptor(ndim = hyp_params.orig_d_v)
+        # adaptor_v = Adaptor(ndim = hyp_params.orig_d_v)
+        # adaptor_a = Adaptor(ndim = hyp_params.orig_d_a)
+        # adaptor_l = Adaptor(ndim = hyp_params.orig_d_l)
+        adaptor_v = Adaptor(ndim = hyp_params.orig_d_a)
         adaptor_a = Adaptor(ndim = hyp_params.orig_d_a)
-        adaptor_l = Adaptor(ndim = hyp_params.orig_d_l)
-    
+        adaptor_l = ContextGateAdaptor(ndim = hyp_params.orig_d_l)
+
+
         model.proj_v = adaptor_v
         model.proj_a = adaptor_a
         model.proj_l = adaptor_l
@@ -126,9 +130,10 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
         proc_loss, proc_size = 0, 0
         start_time = time.time()
         #prev_weights = None
-        for i_batch, (batch_X, batch_Y, batch_META) in enumerate(train_loader):
+        for i_batch, (batch_X, batch_Y, batch_META, batch_context) in enumerate(train_loader):
             #import pdb; pdb.set_trace()
             sample_ind, text, audio, vision = batch_X
+            context_t, context_v = batch_context
             eval_attr = batch_Y.squeeze(-1)   # if num of labels is 1
             
             model.zero_grad()
@@ -138,7 +143,7 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
                 
             if hyp_params.use_cuda:
                 with torch.cuda.device(0):
-                    text, audio, vision, eval_attr = text.cuda(), audio.cuda(), vision.cuda(), eval_attr.cuda()
+                    text, audio, vision, eval_attr, context_t = text.cuda(), audio.cuda(), vision.cuda(), eval_attr.cuda(), context_t.cuda()
                     if hyp_params.dataset == 'iemocap':
                         eval_attr = eval_attr.long()
             
@@ -194,7 +199,7 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
                 ctc_loss.backward()
                 combined_loss = raw_loss + ctc_loss
             else:
-                preds, hiddens = net(text, audio, vision)
+                preds, hiddens = net(text, audio, vision, context_t = context_t)
                 if hyp_params.dataset == 'iemocap':
                     preds = preds.view(-1, 2)
                     eval_attr = eval_attr.view(-1)

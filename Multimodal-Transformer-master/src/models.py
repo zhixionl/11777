@@ -98,9 +98,9 @@ class MULTModel(nn.Module):
         x_v = x_v.transpose(1, 2)
        
         # Project the textual/visual/audio features
-        proj_x_l = x_l if self.orig_d_l == self.d_l else self.proj_l(x_l)
+        proj_x_l = x_l if self.orig_d_l == self.d_l else self.proj_l(x_l, context_t = context_t)
         proj_x_a = x_a if self.orig_d_a == self.d_a else self.proj_a(x_a)
-        proj_x_v = x_v if self.orig_d_v == self.d_v else self.proj_v(x_v)
+        proj_x_v = x_v if self.orig_d_v == self.d_v else self.proj_v(x_v, context_v = context_v)
         proj_x_a = proj_x_a.permute(2, 0, 1)
         proj_x_v = proj_x_v.permute(2, 0, 1)
         proj_x_l = proj_x_l.permute(2, 0, 1)

@@ -128,7 +128,6 @@ class ContextGateAdaptor(nn.Module):
     def forward(self, input, context):
         # import pdb; pdb.set_trace()
         input =  input.transpose(1, 2)
-
         att = self.attention(Q=input, K=context, V=context)
         
         input_sig = torch.sigmoid(input)
