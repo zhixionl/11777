@@ -18,38 +18,13 @@ from sklearn.metrics import precision_recall_fscore_support
 from sklearn.metrics import accuracy_score, f1_score
 from src.eval_metrics import *
 
-
+from adapters import Adaptor, ContextGateAdaptor, ContextConcatAdaptor
 ####################################################################
 #
 # Construct the model and the CTC module (which may not be needed)
 #
 ####################################################################
 
-  # define adapator 
-class Adaptor(nn.Module):
-    def __init__(self, ndim, rank=32):
-        
-        super().__init__()
-        self.conv = nn.Conv1d(in_channels = ndim, out_channels = 30, kernel_size=1, padding=0, bias=False)
-        self.rank = rank
-        self.down_proj = nn.Linear(ndim, rank)
-        self.dropout = nn.Dropout(p=0.1)
-        self.up_proj = nn.Linear(rank, ndim)
-        nn.init.normal_(self.down_proj.weight, std = 1/rank)
-        nn.init.zeros_(self.up_proj.weight)
-
-    def forward(self, input):
-        # import pdb; pdb.set_trace()
-        input =  input.transpose(1, 2)
-        down_projection = self.down_proj(input)
-        #down_projection = self.dropout(down_projection)
-        up_projection = self.up_proj(down_projection)
-        up_projection = self.dropout(up_projection)
-        sum_projection = up_projection + input 
-
-        sum_projection = sum_projection.transpose(1, 2)
-        
-        return self.conv(sum_projection)
 
 def get_CTC_module(hyp_params):
     a2l_module = getattr(ctc, 'CTCModule')(in_dim=hyp_params.orig_d_a, out_seq_len=hyp_params.l_len)

@@ -89,7 +89,7 @@ class MULTModel(nn.Module):
                                   embed_dropout=self.embed_dropout,
                                   attn_mask=self.attn_mask)
             
-    def forward(self, x_l, x_a, x_v):
+    def forward(self, x_l, x_a, x_v, context_t = None, context_v = None):
         """
         text, audio, and vision should have dimension [batch_size, seq_len, n_features]
         """
@@ -139,7 +139,8 @@ class MULTModel(nn.Module):
             last_hs = torch.cat([last_h_l, last_h_a, last_h_v], dim=1)
         
         # A residual block
-        last_hs_proj = self.proj2(F.dropout(F.relu(self.proj1(last_hs)), p=self.out_dropout, training=self.training))
+        last_hs_proj = self.proj1(last_hs)
+        last_hs_proj = self.proj2(F.dropout(F.relu(last_hs_proj), p=self.out_dropout, training=self.training))
         last_hs_proj += last_hs
         
         output = self.out_layer(last_hs_proj)
