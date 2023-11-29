@@ -19,6 +19,7 @@ from sklearn.metrics import accuracy_score, f1_score
 from src.eval_metrics import *
 
 from src.adapters import Adaptor, ContextGateAdaptor, ContextConcatAdaptor
+from src.adapters import GatedAttention
 ####################################################################
 #
 # Construct the model and the CTC module (which may not be needed)
@@ -70,6 +71,8 @@ def initiate(hyp_params, train_loader, valid_loader, test_loader):
         model.proj_v = adaptor_v
         model.proj_a = adaptor_a
         model.proj_l = adaptor_l
+
+        # model.trans_l_mem = GatedAttention(ndim = model.d_l*2, orig_self_attn = model.trans_l_mem)#replace with gated attn
     
 
     optimizer = getattr(optim, hyp_params.optim)(model.parameters(), lr=hyp_params.lr)
@@ -178,7 +181,11 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
             ######## CTC ENDS ########
                 
             combined_loss = 0
+
+            
+
             net = nn.DataParallel(model) if batch_size > 10 else model
+
             if batch_chunk > 1:
                 raw_loss = combined_loss = 0
                 text_chunks = text.chunk(batch_chunk, dim=0)
@@ -200,7 +207,8 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
                 ctc_loss.backward()
                 combined_loss = raw_loss + ctc_loss
             else:
-                context_t = None
+                # context_t = None
+
                 preds, hiddens = net(text, audio, vision, context_t = context_t)
                 if hyp_params.dataset == 'iemocap':
                     preds = preds.view(-1, 2)
@@ -265,7 +273,7 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
                     vision, _ = ctc_v2l_net(vision)   # vision aligned to text
                 
                 net = nn.DataParallel(model) if batch_size > 10 else model
-                context_t = None
+                # context_t = None
                 preds, _ = net(text, audio, vision, context_t)
                 if hyp_params.dataset == 'iemocap':
                     preds = preds.view(-1, 2)
