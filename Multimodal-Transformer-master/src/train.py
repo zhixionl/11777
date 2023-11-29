@@ -18,7 +18,7 @@ from sklearn.metrics import precision_recall_fscore_support
 from sklearn.metrics import accuracy_score, f1_score
 from src.eval_metrics import *
 
-from adapters import Adaptor, ContextGateAdaptor, ContextConcatAdaptor
+from src.adapters import Adaptor, ContextGateAdaptor, ContextConcatAdaptor
 ####################################################################
 #
 # Construct the model and the CTC module (which may not be needed)
@@ -61,9 +61,10 @@ def initiate(hyp_params, train_loader, valid_loader, test_loader):
         # adaptor_v = Adaptor(ndim = hyp_params.orig_d_v)
         # adaptor_a = Adaptor(ndim = hyp_params.orig_d_a)
         # adaptor_l = Adaptor(ndim = hyp_params.orig_d_l)
-        adaptor_v = Adaptor(ndim = hyp_params.orig_d_a)
+        adaptor_v = Adaptor(ndim = hyp_params.orig_d_v)
         adaptor_a = Adaptor(ndim = hyp_params.orig_d_a)
         adaptor_l = ContextGateAdaptor(ndim = hyp_params.orig_d_l)
+        #adaptor_l = Adaptor(ndim = hyp_params.orig_d_l)
 
 
         model.proj_v = adaptor_v
@@ -96,9 +97,9 @@ def initiate(hyp_params, train_loader, valid_loader, test_loader):
                 'ctc_v2l_optimizer': ctc_v2l_optimizer,
                 'ctc_criterion': ctc_criterion,
                 'scheduler': scheduler}
-    torch.cuda.empty_cache()
-    import gc
-    gc.collect()
+    #torch.cuda.empty_cache()
+    #import gc
+    #gc.collect()
     return train_model(settings, hyp_params, train_loader, valid_loader, test_loader)
 
 
@@ -199,6 +200,7 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
                 ctc_loss.backward()
                 combined_loss = raw_loss + ctc_loss
             else:
+                context_t = None
                 preds, hiddens = net(text, audio, vision, context_t = context_t)
                 if hyp_params.dataset == 'iemocap':
                     preds = preds.view(-1, 2)
@@ -239,9 +241,10 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
         return_index = []
 
         with torch.no_grad():
-            for i_batch, (batch_X, batch_Y, batch_META) in enumerate(loader):
+            for i_batch, (batch_X, batch_Y, batch_META, batch_context) in enumerate(loader):
                 
                 sample_ind, text, audio, vision = batch_X
+                context_t, context_v = batch_context
                 #import pdb; pdb.set_trace()
                 if last_test:
                     return_index.append(batch_META[0])
@@ -249,7 +252,7 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
             
                 if hyp_params.use_cuda:
                     with torch.cuda.device(0):
-                        text, audio, vision, eval_attr = text.cuda(), audio.cuda(), vision.cuda(), eval_attr.cuda()
+                        text, audio, vision, eval_attr, context_t = text.cuda(), audio.cuda(), vision.cuda(), eval_attr.cuda(), context_t.cuda()
                         if hyp_params.dataset == 'iemocap':
                             eval_attr = eval_attr.long()
                         
@@ -262,7 +265,8 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
                     vision, _ = ctc_v2l_net(vision)   # vision aligned to text
                 
                 net = nn.DataParallel(model) if batch_size > 10 else model
-                preds, _ = net(text, audio, vision)
+                context_t = None
+                preds, _ = net(text, audio, vision, context_t)
                 if hyp_params.dataset == 'iemocap':
                     preds = preds.view(-1, 2)
                     eval_attr = eval_attr.view(-1)
@@ -291,19 +295,20 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
         train_loss = train(model, optimizer, criterion, ctc_a2l_module, ctc_v2l_module, ctc_a2l_optimizer, ctc_v2l_optimizer, ctc_criterion)
         
         val_loss, _, _, _ = evaluate(model, ctc_a2l_module, ctc_v2l_module, criterion, test=False)
-        test_loss, _, _, _ = evaluate(model, ctc_a2l_module, ctc_v2l_module, criterion, test=True)
+        test_loss, _, _, _ = evaluate(model, ctc_a2l_module, ctc_v2l_module, criterion, test=False)
         end = time.time()
         duration = end-start
-        scheduler.step(val_loss)    # Decay learning rate by validation loss
+        scheduler.step(test_loss)    # Decay learning rate by validation loss
 
         print("-"*50)
         print('Epoch {:2d} | Time {:5.4f} sec | Valid Loss {:5.4f} | Test Loss {:5.4f} | Train Loss {:5.4f}'.format(epoch, duration, val_loss, test_loss, train_loss))
         print("-"*50)
         
-        if val_loss < best_valid:
+        #if val_loss < best_valid:
+        if test_loss < best_valid:
             print(f"Saved model at pre_trained_models/{hyp_params.name}.pt!")
             save_model(hyp_params, model, name=hyp_params.name)
-            best_valid = val_loss
+            best_valid = test_loss
     #import pdb; pdb.set_trace()
     model = load_model(hyp_params, name=hyp_params.name)
     _, results, truths, video_index = evaluate(model, ctc_a2l_module, ctc_v2l_module, criterion, test=True, last_test=True)
@@ -321,6 +326,8 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
     elif hyp_params.dataset == 'mustard_w_context':
         eval_mustard(results, truths, video_index)
     elif hyp_params.dataset == 'mustard_dep_t_context':
+        eval_mustard(results, truths, video_index)
+    elif hyp_params.dataset == 'mustard_indep_t_context':
         eval_mustard(results, truths, video_index)
     else:
         eval_mustard(results, truths, video_index)

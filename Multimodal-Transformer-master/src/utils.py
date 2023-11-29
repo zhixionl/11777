@@ -31,6 +31,9 @@ def save_model(args, model, name=''):
 
 
 def load_model(args, name=''):
+    #import pdb; pdb.set_trace()
     name = save_load_name(args, name)
+    #name = "mult_MULT_test_prev"
+    print(f'pre_trained_models/{name}.pt')
     model = torch.load(f'pre_trained_models/{name}.pt')
     return model

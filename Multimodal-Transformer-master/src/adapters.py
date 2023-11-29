@@ -98,6 +98,56 @@ class ContextConcatAdaptor(nn.Module):
         # simple additive fusion 
         return self.proj(last_hs) + context
 
+# class ContextGateAdaptor(nn.Module):
+#     '''
+#     Adapter to fuse context with input embedding with gate 
+#     Gate is the ordinary complementary gates (OCG)
+#     https://arxiv.org/pdf/2102.10407.pdf
+#     '''
+#     def __init__(self, ndim, rank=32):
+        
+#         super().__init__()
+#         self.conv = nn.Conv1d(in_channels = ndim, out_channels = 30, kernel_size=1, padding=0, bias=False)
+#         self.rank = rank
+#         self.adapter_main = nn.Sequential(
+#             nn.Linear(ndim, rank),
+#             nn.Linear(rank, ndim),
+#             nn.Dropout(p=0.1)
+#         )
+#         nn.init.normal_(self.adapter_main[0].weight, std = 1/rank)
+#         nn.init.zeros_(self.adapter_main[1].weight)
+
+#         # [T;T_c] shape (T+T_c, ndim)
+#         # gate.shape = (T+T_c,T+T_c)
+#         # W shape(ndim,T_c)
+#         self.attention = Multiheadattention(num_attention_heads=4, hidden_dim=ndim)
+#         self.layer_norm = nn.LayerNorm(ndim)
+#         self.threshold = 0.1 # the threshold of the gate
+
+
+#     def forward(self, input, context):
+#         # import pdb; pdb.set_trace()
+#         input =  input.transpose(1, 2)
+#         att = self.attention(Q=input, K=context, V=context)
+        
+#         input_sig = torch.sigmoid(input)
+#         att_sig = 1 - input_sig
+#         G_input = torch.where(input_sig > self.threshold, att_sig, 0)
+#         G_att = torch.where(att_sig > self.threshold, att_sig, 0)
+
+#         input = G_input * input + G_att * att
+#         input = self.layer_norm(input)
+
+#         up_projection = self.adapter_main(input)
+#         input_main = up_projection + input # input of main modality after lora
+
+#         sum_projection = input_main.transpose(1, 2)
+        
+#         return self.conv(sum_projection)
+
+
+
+
 class ContextGateAdaptor(nn.Module):
     '''
     Adapter to fuse context with input embedding with gate 
@@ -107,42 +157,49 @@ class ContextGateAdaptor(nn.Module):
     def __init__(self, ndim, rank=32):
         
         super().__init__()
-        self.conv = nn.Conv1d(in_channels = ndim, out_channels = 30, kernel_size=1, padding=0, bias=False)
-        self.rank = rank
-        self.adapter_main = nn.Sequential(
-            self.nn.Linear(ndim, rank),
-            self.nn.Linear(rank, ndim),
-            self.nn.Dropout(p=0.1)
-        )
-        nn.init.normal_(self.adapter_main[0].weight, std = 1/rank)
-        nn.init.zeros_(self.adapter_main[1].weight)
+        # self.conv = nn.Conv1d(in_channels = ndim, out_channels = 30, kernel_size=1, padding=0, bias=False)
+        # self.rank = rank
+        # self.adapter_main = nn.Sequential(
+        #     nn.Linear(ndim, rank),
+        #     nn.Linear(rank, ndim),
+        #     nn.Dropout(p=0.1)
+        # )
+        # nn.init.normal_(self.adapter_main[0].weight, std = 1/rank)
+        # nn.init.zeros_(self.adapter_main[1].weight)
 
         # [T;T_c] shape (T+T_c, ndim)
         # gate.shape = (T+T_c,T+T_c)
         # W shape(ndim,T_c)
-        self.attention = Multiheadattention(num_attention_heads=4, hidden_dim=8)
+        self.attention = Multiheadattention(num_attention_heads=4, hidden_dim=ndim)
         self.layer_norm = nn.LayerNorm(ndim)
-        self.threshold = 0.5 # the threshold of the gate
+        self.threshold = 0.1 # the threshold of the gate
+
+        self.adapter = Adaptor(ndim, rank = rank)
+
 
 
     def forward(self, input, context):
-        # import pdb; pdb.set_trace()
-        input =  input.transpose(1, 2)
-        att = self.attention(Q=input, K=context, V=context)
+        #import pdb; pdb.set_trace()
         
-        input_sig = torch.sigmoid(input)
-        att_sig = 1 - input_sig
-        G_input = torch.where(input_sig > self.threshold, att_sig, 0)
-        G_att = torch.where(att_sig > self.threshold, att_sig, 0)
+        if context != None:
+          #print('pass')
+          input =  input.transpose(1, 2)
+          att = self.attention(Q=input, K=context, V=context)
+          
+          input_sig = torch.sigmoid(input)
+          att_sig = 1 - input_sig
+          G_input = torch.where(input_sig > self.threshold, att_sig, 0)
+          G_att = torch.where(att_sig > self.threshold, att_sig, 0)
 
-        input = G_input * input + G_att * att
-        input = self.layer_norm(input)
+          input = G_input * input + G_att * att
+          input = self.layer_norm(input)
 
-        up_projection = self.adapter_main(input)
-        input_main = up_projection + input # input of main modality after lora
+          # up_projection = self.adapter_main(input)
+          # input_main = up_projection + input # input of main modality after lora
 
-        sum_projection = input_main.transpose(1, 2)
+          #sum_projection = input_main.transpose(1, 2)
         
-        return self.conv(sum_projection)
+        #return self.conv(sum_projection)
+        return self.adapter(input)
 
 
