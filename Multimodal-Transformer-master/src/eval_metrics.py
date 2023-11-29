@@ -1,4 +1,5 @@
 import torch
+import pickle
 import numpy as np
 from sklearn.metrics import classification_report
 from sklearn.metrics import confusion_matrix
@@ -60,10 +61,11 @@ def eval_mosei_senti(results, truths, exclude_zero=False):
 def eval_mosi(results, truths, exclude_zero=False):
     return eval_mosei_senti(results, truths, exclude_zero)
 
-def eval_mustard(results, truths):
+def eval_mustard(results, truths, video_index):
     test_preds = torch.sigmoid(results) > 0.5 
     test_preds = test_preds.to(int).flatten().cpu().detach().numpy()
     test_truth = truths.to(int).flatten().cpu().detach().numpy()
+
 
     p, r, f, s = precision_recall_fscore_support(test_truth, test_preds, average="weighted")
     print("precision: ", p)
@@ -72,6 +74,13 @@ def eval_mustard(results, truths):
     print("Accuracy: ", accuracy_score(test_truth, test_preds))
 
     print("-" * 50)
+    
+    to_return = {}
+    to_return['truth'] = test_truth
+    to_return['pred'] = test_preds
+    to_return['video_index'] = video_index
+    with open('error_analysis_ind.pkl', 'wb') as f:
+        pickle.dump(to_return, f)
 
 
 
