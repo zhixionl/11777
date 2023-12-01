@@ -55,7 +55,7 @@ parser.add_argument('--batch_size', type=int, default=24, metavar='N',
                     help='batch size (default: 24)')
 parser.add_argument('--clip', type=float, default=0.8,
                     help='gradient clip value (default: 0.8)')
-parser.add_argument('--lr', type=float, default=1e-3,
+parser.add_argument('--lr', type=float, default=1e-4,
                     help='initial learning rate (default: 1e-3)')
 parser.add_argument('--optim', type=str, default='Adam',
                     help='optimizer to use (default: Adam)')
@@ -92,12 +92,19 @@ output_dim_dict = {
     'mosi': 1,
     'mosei_senti': 1,
     'iemocap': 8,
-    'mustard': 1
+    'mustard': 1,
+    'mustard_ind': 1,
+    'mustard_ind_w_context': 1
+
 }
 
 criterion_dict = {
     'iemocap': 'CrossEntropyLoss',
-    'mustard': 'BCEWithLogitsLoss'
+    'mustard': 'BCEWithLogitsLoss',
+    'mustard_ind': 'BCEWithLogitsLoss', 
+    'mustard_ind_w_context': 'BCEWithLogitsLoss',
+    'mustard_indep_no_context': 'BCEWithLogitsLoss',
+    'mustard_indep_t_context': 'BCEWithLogitsLoss'
 }
 
 torch.set_default_tensor_type('torch.FloatTensor')
@@ -146,9 +153,11 @@ hyp_params.batch_chunk = args.batch_chunk
 hyp_params.n_train, hyp_params.n_valid, hyp_params.n_test = len(train_data), len(valid_data), len(test_data)
 hyp_params.model = str.upper(args.model.strip())
 hyp_params.output_dim = output_dim_dict.get(dataset, 1)
-hyp_params.criterion = criterion_dict.get(dataset, 'L1Loss')
+hyp_params.criterion = criterion_dict.get(dataset, 'BCEWithLogitsLoss')
 
 
 if __name__ == '__main__':
+    print('#### Dataset ###', hyp_params.dataset)
     test_loss = train.initiate(hyp_params, train_loader, valid_loader, test_loader)
+
 
