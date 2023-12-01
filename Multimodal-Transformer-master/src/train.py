@@ -19,7 +19,6 @@ from sklearn.metrics import accuracy_score, f1_score
 from src.eval_metrics import *
 
 from src.adapters import Adaptor, ContextGateAdaptor, ContextConcatAdaptor
-from src.adapters import GatedAttention
 ####################################################################
 #
 # Construct the model and the CTC module (which may not be needed)
@@ -64,15 +63,15 @@ def initiate(hyp_params, train_loader, valid_loader, test_loader):
         # adaptor_l = Adaptor(ndim = hyp_params.orig_d_l)
         adaptor_v = Adaptor(ndim = hyp_params.orig_d_v)
         adaptor_a = Adaptor(ndim = hyp_params.orig_d_a)
-        adaptor_l = ContextGateAdaptor(ndim = hyp_params.orig_d_l)
-        #adaptor_l = Adaptor(ndim = hyp_params.orig_d_l)
+        #adaptor_l_init = Adaptor(ndim = hyp_params.orig_d_l)
+        adaptor_l = ContextGateAdaptor(ndim = hyp_params.orig_d_l, context=True)
+       # import pdb; pdb.set_trace()
+        #adaptor_l.adapter = adaptor_l_init
 
 
         model.proj_v = adaptor_v
         model.proj_a = adaptor_a
         model.proj_l = adaptor_l
-
-        # model.trans_l_mem = GatedAttention(ndim = model.d_l*2, orig_self_attn = model.trans_l_mem)#replace with gated attn
     
 
     optimizer = getattr(optim, hyp_params.optim)(model.parameters(), lr=hyp_params.lr)
@@ -181,11 +180,7 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
             ######## CTC ENDS ########
                 
             combined_loss = 0
-
-            
-
             net = nn.DataParallel(model) if batch_size > 10 else model
-
             if batch_chunk > 1:
                 raw_loss = combined_loss = 0
                 text_chunks = text.chunk(batch_chunk, dim=0)
@@ -196,7 +191,7 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
                 for i in range(batch_chunk):
                     text_i, audio_i, vision_i = text_chunks[i], audio_chunks[i], vision_chunks[i]
                     eval_attr_i = eval_attr_chunks[i]
-                    preds_i, hiddens_i = net(text_i, audio_i, vision_i)
+                    preds_i, hiddens_i = net(text_i, audio_i, vision_i, context_t)
                     
                     if hyp_params.dataset == 'iemocap':
                         preds_i = preds_i.view(-1, 2)
@@ -207,9 +202,9 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
                 ctc_loss.backward()
                 combined_loss = raw_loss + ctc_loss
             else:
-                # context_t = None
-
-                preds, hiddens = net(text, audio, vision, context_t = context_t)
+                #context_t = None
+                #import pdb; pdb.set_trace()
+                preds, hiddens = net(text, audio, vision, context_t)
                 if hyp_params.dataset == 'iemocap':
                     preds = preds.view(-1, 2)
                     eval_attr = eval_attr.view(-1)
@@ -273,7 +268,7 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
                     vision, _ = ctc_v2l_net(vision)   # vision aligned to text
                 
                 net = nn.DataParallel(model) if batch_size > 10 else model
-                # context_t = None
+                #context_t = None
                 preds, _ = net(text, audio, vision, context_t)
                 if hyp_params.dataset == 'iemocap':
                     preds = preds.view(-1, 2)
@@ -303,7 +298,7 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
         train_loss = train(model, optimizer, criterion, ctc_a2l_module, ctc_v2l_module, ctc_a2l_optimizer, ctc_v2l_optimizer, ctc_criterion)
         
         val_loss, _, _, _ = evaluate(model, ctc_a2l_module, ctc_v2l_module, criterion, test=False)
-        test_loss, _, _, _ = evaluate(model, ctc_a2l_module, ctc_v2l_module, criterion, test=False)
+        test_loss, _, _, _ = evaluate(model, ctc_a2l_module, ctc_v2l_module, criterion, test=True)
         end = time.time()
         duration = end-start
         scheduler.step(test_loss)    # Decay learning rate by validation loss
@@ -311,6 +306,7 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
         print("-"*50)
         print('Epoch {:2d} | Time {:5.4f} sec | Valid Loss {:5.4f} | Test Loss {:5.4f} | Train Loss {:5.4f}'.format(epoch, duration, val_loss, test_loss, train_loss))
         print("-"*50)
+       # import pdb; pdb.set_trace()
         
         #if val_loss < best_valid:
         if test_loss < best_valid:
