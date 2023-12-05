@@ -155,7 +155,7 @@ class ContextGateAdaptor(nn.Module):
     Gate is the ordinary complementary gates (OCG)
     https://arxiv.org/pdf/2102.10407.pdf
     '''
-    def __init__(self, ndim, rank=32, context=False):
+    def __init__(self, ndim, rank=32, context=False, threshold = 0.1):
         
         super().__init__()
         
@@ -163,7 +163,7 @@ class ContextGateAdaptor(nn.Module):
         if context:
           self.attention = Multiheadattention(num_attention_heads=4, hidden_dim=ndim)
           self.layer_norm = nn.LayerNorm(ndim)
-          self.threshold = 0.9 # the threshold of the gate
+          self.threshold = threshold # the threshold of the gate
         
 
 
@@ -189,3 +189,55 @@ class ContextGateAdaptor(nn.Module):
         return out
 
 
+class GatedAttention(nn.Module):
+  '''
+  Adapter to fuse context with input embedding with gate 
+  Gate is the ordinary complementary gates (OCG)
+  https://arxiv.org/pdf/2102.10407.pdf
+  '''
+  def __init__(self, ndim,threshold, orig_self_attn,  rank=28):
+      
+      super().__init__()
+
+      self.gated_attention = Multiheadattention(num_attention_heads=4, hidden_dim = ndim)
+      self.layer_norm = nn.LayerNorm(ndim)
+      self.threshold = threshold # the threshold of the gate
+
+      self.self_attn = orig_self_attn
+
+
+
+  def forward(self, input, context):
+      #import pdb; pdb.set_trace()
+      
+      if context != None:
+        #print('pass')
+
+        #pass both context and utterance into original pretrained self-attention
+        input_self_attn = self.self_attn(input)
+        if type(input_self_attn) == tuple:
+            input_self_attn = input_self_attn[0]
+        # input_self_attn = input_self_attn[-1]   #take last
+
+        context_self_attn = self.self_attn(context)
+        if type(context_self_attn) == tuple:
+            context_self_attn = context_self_attn[0]
+        # context_self_attn = context_self_attn[-1]   
+
+
+
+        input_self_attn =  input_self_attn.transpose(0,1)
+        context_self_attn =  context_self_attn.transpose(0,1)
+
+        # import pdb; pdb.set_trace()
+        att = self.gated_attention(Q=input_self_attn, K=context_self_attn, V=context_self_attn)
+        
+        input_sig = torch.sigmoid(input_self_attn)
+        att_sig = 1 - input_sig
+        G_input = torch.where(input_sig > self.threshold, att_sig, 0)
+        G_att = torch.where(att_sig > self.threshold, att_sig, 0)
+
+        input_self_attn = G_input * input_self_attn + G_att * att
+        input_self_attn = self.layer_norm(input_self_attn)
+
+      return input_self_attn

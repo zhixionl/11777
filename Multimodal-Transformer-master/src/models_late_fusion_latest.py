@@ -58,7 +58,10 @@ class MULTModel(nn.Module):
         self.trans_l_mem = self.get_network(self_type='l_mem', layers=3)
         self.trans_a_mem = self.get_network(self_type='a_mem', layers=3)
         self.trans_v_mem = self.get_network(self_type='v_mem', layers=3)
-       
+
+        # # Gated Attention
+        # self.trans_l_mem = GatedAttention(ndim = self.d_l, orig_self_attn=self.trans_l_mem)
+        
         # Projection layers
         self.proj1 = nn.Linear(combined_dim, combined_dim)
         self.proj2 = nn.Linear(combined_dim, combined_dim)
@@ -81,13 +84,13 @@ class MULTModel(nn.Module):
             raise ValueError("Unknown network type")
         
         return TransformerEncoder(embed_dim=embed_dim,
-                                  num_heads=self.num_heads,
-                                  layers=max(self.layers, layers),
-                                  attn_dropout=attn_dropout,
-                                  relu_dropout=self.relu_dropout,
-                                  res_dropout=self.res_dropout,
-                                  embed_dropout=self.embed_dropout,
-                                  attn_mask=self.attn_mask)
+                                    num_heads=self.num_heads,
+                                    layers=max(self.layers, layers),
+                                    attn_dropout=attn_dropout,
+                                    relu_dropout=self.relu_dropout,
+                                    res_dropout=self.res_dropout,
+                                    embed_dropout=self.embed_dropout,
+                                    attn_mask=self.attn_mask)
             
     def forward(self, x_l, x_a, x_v, context_t = None, context_v = None):
         """
@@ -96,31 +99,63 @@ class MULTModel(nn.Module):
         x_l = F.dropout(x_l.transpose(1, 2), p=self.embed_dropout, training=self.training)
         x_a = x_a.transpose(1, 2)
         x_v = x_v.transpose(1, 2)
-        #x_v = F.dropout(x_v.transpose(1, 2), p=self.embed_dropout, training=self.training)
-       
+        
         # Project the textual/visual/audio features
         #import pdb; pdb.set_trace()
-        #proj_x_l = x_l if self.orig_d_l == self.d_l else self.proj_l(x_l, context = context_t)
+        # proj_x_l = x_l if self.orig_d_l == self.d_l else self.proj_l(x_l, context = context_t)
         #import pdb; pdb.set_trace()
-        proj_x_l = x_l if self.orig_d_l == self.d_l else self.proj_l(x_l, context_t)
+        proj_x_l = x_l if self.orig_d_l == self.d_l else self.proj_l(x_l, context = None)
         proj_x_a = x_a if self.orig_d_a == self.d_a else self.proj_a(x_a)
-        #proj_x_v = x_v if self.orig_d_v == self.d_v else self.proj_v(x_v)
-        #import pdb; pdb.set_trace()
-        proj_x_v = x_v if self.orig_d_v == self.d_v else self.proj_v(x_v, context_v)
-        
+        proj_x_v = x_v if self.orig_d_v == self.d_v else self.proj_v(x_v)
         proj_x_a = proj_x_a.permute(2, 0, 1)
         proj_x_v = proj_x_v.permute(2, 0, 1)
         proj_x_l = proj_x_l.permute(2, 0, 1)
+
+        
+        #MuLT Context
+        # print(context_t.shape)
+        # if context_t is not None:
+        context_t = context_t.transpose(1, 2)
+        proj_context_l = x_l if self.orig_d_l == self.d_l else self.proj_l(x_l, context = None)
+        proj_context_l = proj_context_l.permute(2, 0, 1)
+        # print(context_t.shape)
+
+        context_v = context_v.transpose(1, 2)
+        proj_context_v = x_v if self.orig_d_v == self.d_v else self.proj_v(x_v, context = None)
+        proj_context_v = proj_context_v.permute(2, 0, 1)
 
         if self.lonly:
             # (V,A) --> L
             h_l_with_as = self.trans_l_with_a(proj_x_l, proj_x_a, proj_x_a)    # Dimension (L, N, d_l)
             h_l_with_vs = self.trans_l_with_v(proj_x_l, proj_x_v, proj_x_v)    # Dimension (L, N, d_l)
             h_ls = torch.cat([h_l_with_as, h_l_with_vs], dim=2)
-            h_ls = self.trans_l_mem(h_ls)
-            if type(h_ls) == tuple:
-                h_ls = h_ls[0]
-            last_h_l = last_hs = h_ls[-1]   # Take the last output for prediction
+
+            # h_ls = self.trans_l_mem(h_ls) #self attn
+            # if type(h_ls) == tuple:
+            #     h_ls = h_ls[0]
+            # last_h_l = last_hs = h_ls[-1]   # Take the last output for prediction
+
+            #MuLT Context
+
+
+            #cross attention V -> L
+            if proj_context_v is not None: #if visual context given
+                h_context_l = self.trans_l_with_v(proj_context_l, proj_context_v, proj_context_v)
+            else:
+                h_context_l = proj_context_l
+
+            #self attn
+            filler=torch.zeros_like(h_context_l)
+            h_context_l = torch.cat([h_context_l,filler],dim=2)
+            # h_context_l = self.trans_l_mem(h_context_l)
+            # if type(h_context_l) == tuple:
+            #     h_context_l = h_context_l[0]
+            # last_h_context_l = h_context_l[-1]   # Take the last output for prediction
+
+            #gated attention between langugage utterance and context
+            last_h_l = self.trans_l_mem(input = h_ls, context = h_context_l) 
+            last_h_l = last_h_l[:,-1] #take last
+
 
         if self.aonly:
             # (L,V) --> A
@@ -137,10 +172,24 @@ class MULTModel(nn.Module):
             h_v_with_ls = self.trans_v_with_l(proj_x_v, proj_x_l, proj_x_l)
             h_v_with_as = self.trans_v_with_a(proj_x_v, proj_x_a, proj_x_a)
             h_vs = torch.cat([h_v_with_ls, h_v_with_as], dim=2)
-            h_vs = self.trans_v_mem(h_vs)
-            if type(h_vs) == tuple:
-                h_vs = h_vs[0]
-            last_h_v = last_hs = h_vs[-1]
+           # h_vs = self.trans_v_mem(h_vs)
+            # if type(h_vs) == tuple:
+            #     h_vs = h_vs[0]
+            # last_h_v = last_hs = h_vs[-1]
+#z
+            if proj_context_l is not None: #if visual context given
+                #import pdb; pdb.set_trace()
+                h_context_v = self.trans_v_with_l(proj_context_v, proj_context_l, proj_context_l)
+            else:
+                h_context_v = proj_context_v
+
+            #self attn
+            filler=torch.zeros_like(h_context_v)
+            h_context_v = torch.cat([h_context_v,filler],dim=2)
+            last_h_v = self.trans_v_mem(input = h_vs, context = h_context_v) 
+            last_h_v = last_h_v[:,-1] #take last
+
+        # import pdb; pdb.set_trace()
         
         if self.partial_mode == 3:
             last_hs = torch.cat([last_h_l, last_h_a, last_h_v], dim=1)
@@ -151,4 +200,6 @@ class MULTModel(nn.Module):
         last_hs_proj += last_hs
         
         output = self.out_layer(last_hs_proj)
+
         return output, last_hs
+

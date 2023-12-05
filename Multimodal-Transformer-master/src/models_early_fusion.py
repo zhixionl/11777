@@ -96,7 +96,6 @@ class MULTModel(nn.Module):
         x_l = F.dropout(x_l.transpose(1, 2), p=self.embed_dropout, training=self.training)
         x_a = x_a.transpose(1, 2)
         x_v = x_v.transpose(1, 2)
-        #x_v = F.dropout(x_v.transpose(1, 2), p=self.embed_dropout, training=self.training)
        
         # Project the textual/visual/audio features
         #import pdb; pdb.set_trace()
@@ -105,7 +104,6 @@ class MULTModel(nn.Module):
         proj_x_l = x_l if self.orig_d_l == self.d_l else self.proj_l(x_l, context_t)
         proj_x_a = x_a if self.orig_d_a == self.d_a else self.proj_a(x_a)
         #proj_x_v = x_v if self.orig_d_v == self.d_v else self.proj_v(x_v)
-        #import pdb; pdb.set_trace()
         proj_x_v = x_v if self.orig_d_v == self.d_v else self.proj_v(x_v, context_v)
         
         proj_x_a = proj_x_a.permute(2, 0, 1)

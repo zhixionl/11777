@@ -18,7 +18,7 @@ from sklearn.metrics import precision_recall_fscore_support
 from sklearn.metrics import accuracy_score, f1_score
 from src.eval_metrics import *
 
-from src.adapters import Adaptor, ContextGateAdaptor, ContextConcatAdaptor
+from src.adapters import Adaptor, ContextGateAdaptor, ContextConcatAdaptor, GatedAttention
 ####################################################################
 #
 # Construct the model and the CTC module (which may not be needed)
@@ -61,10 +61,11 @@ def initiate(hyp_params, train_loader, valid_loader, test_loader):
         # adaptor_v = Adaptor(ndim = hyp_params.orig_d_v)
         # adaptor_a = Adaptor(ndim = hyp_params.orig_d_a)
         # adaptor_l = Adaptor(ndim = hyp_params.orig_d_l)
-        adaptor_v = Adaptor(ndim = hyp_params.orig_d_v)
+        #adaptor_v = Adaptor(ndim = hyp_params.orig_d_v)
+        adaptor_v = ContextGateAdaptor(ndim = hyp_params.orig_d_v, context=True, threshold = 0.25)
         adaptor_a = Adaptor(ndim = hyp_params.orig_d_a)
-        #adaptor_l_init = Adaptor(ndim = hyp_params.orig_d_l)
-        adaptor_l = ContextGateAdaptor(ndim = hyp_params.orig_d_l, context=True)
+        #adaptor_l = Adaptor(ndim = hyp_params.orig_d_l)
+        adaptor_l = ContextGateAdaptor(ndim = hyp_params.orig_d_l, context=True, threshold = 0.1)
        # import pdb; pdb.set_trace()
         #adaptor_l.adapter = adaptor_l_init
 
@@ -72,6 +73,9 @@ def initiate(hyp_params, train_loader, valid_loader, test_loader):
         model.proj_v = adaptor_v
         model.proj_a = adaptor_a
         model.proj_l = adaptor_l
+        #model.trans_l_mem = GatedAttention(ndim = model.d_l*2, threshold = 0.1, orig_self_attn = model.trans_l_mem)#replace with gated attn
+        #model.trans_v_mem = GatedAttention(ndim = model.d_v*2, threshold = 0.65, orig_self_attn = model.trans_v_mem)#replace with gated attn
+    
     
 
     optimizer = getattr(optim, hyp_params.optim)(model.parameters(), lr=hyp_params.lr)
@@ -137,6 +141,7 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
             #import pdb; pdb.set_trace()
             sample_ind, text, audio, vision = batch_X
             context_t, context_v = batch_context
+            context_v = context_v.to(torch.float32)
             eval_attr = batch_Y.squeeze(-1)   # if num of labels is 1
             
             model.zero_grad()
@@ -146,7 +151,7 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
                 
             if hyp_params.use_cuda:
                 with torch.cuda.device(0):
-                    text, audio, vision, eval_attr, context_t = text.cuda(), audio.cuda(), vision.cuda(), eval_attr.cuda(), context_t.cuda()
+                    text, audio, vision, eval_attr, context_t, context_v = text.cuda(), audio.cuda(), vision.cuda(), eval_attr.cuda(), context_t.cuda(), context_v.cuda()
                     if hyp_params.dataset == 'iemocap':
                         eval_attr = eval_attr.long()
             
@@ -191,7 +196,7 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
                 for i in range(batch_chunk):
                     text_i, audio_i, vision_i = text_chunks[i], audio_chunks[i], vision_chunks[i]
                     eval_attr_i = eval_attr_chunks[i]
-                    preds_i, hiddens_i = net(text_i, audio_i, vision_i, context_t)
+                    preds_i, hiddens_i = net(text_i, audio_i, vision_i, context_t, context_v)
                     
                     if hyp_params.dataset == 'iemocap':
                         preds_i = preds_i.view(-1, 2)
@@ -204,7 +209,7 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
             else:
                 #context_t = None
                 #import pdb; pdb.set_trace()
-                preds, hiddens = net(text, audio, vision, context_t)
+                preds, hiddens = net(text, audio, vision, context_t, context_v)
                 if hyp_params.dataset == 'iemocap':
                     preds = preds.view(-1, 2)
                     eval_attr = eval_attr.view(-1)
@@ -248,6 +253,7 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
                 
                 sample_ind, text, audio, vision = batch_X
                 context_t, context_v = batch_context
+                context_v = context_v.to(torch.float32)
                 #import pdb; pdb.set_trace()
                 if last_test:
                     return_index.append(batch_META[0])
@@ -255,7 +261,7 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
             
                 if hyp_params.use_cuda:
                     with torch.cuda.device(0):
-                        text, audio, vision, eval_attr, context_t = text.cuda(), audio.cuda(), vision.cuda(), eval_attr.cuda(), context_t.cuda()
+                        text, audio, vision, eval_attr, context_t, context_v = text.cuda(), audio.cuda(), vision.cuda(), eval_attr.cuda(), context_t.cuda(), context_v.cuda()
                         if hyp_params.dataset == 'iemocap':
                             eval_attr = eval_attr.long()
                         
@@ -269,7 +275,7 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
                 
                 net = nn.DataParallel(model) if batch_size > 10 else model
                 #context_t = None
-                preds, _ = net(text, audio, vision, context_t)
+                preds, _ = net(text, audio, vision, context_t, context_v)
                 if hyp_params.dataset == 'iemocap':
                     preds = preds.view(-1, 2)
                     eval_attr = eval_attr.view(-1)
