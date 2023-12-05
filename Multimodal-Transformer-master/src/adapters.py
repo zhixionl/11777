@@ -188,6 +188,44 @@ class ContextGateAdaptor(nn.Module):
         out = self.adapter(input)
         return out
 
+class ContextGateEarlyAdaptor(nn.Module):
+    '''
+    Adapter to fuse context with input embedding with gate 
+    Gate is the ordinary complementary gates (OCG)
+    https://arxiv.org/pdf/2102.10407.pdf
+    '''
+    def __init__(self, ndim, rank=32, context=False, threshold = 0.1):
+        
+        super().__init__()
+        
+        self.adapter = Adaptor(ndim, rank = rank)
+        if context:
+          self.attention = Multiheadattention(num_attention_heads=4, hidden_dim=ndim)
+          self.layer_norm = nn.LayerNorm(ndim)
+          self.threshold = threshold # the threshold of the gate
+        
+
+    def forward(self, input, context):
+        #import pdb; pdb.set_trace()
+        #context = None
+        input = self.adapter(input)
+
+        if context != None:
+          context = self.adapter(context).transpose(1,2)
+          input =  input.transpose(1, 2)
+          att = self.attention(Q=input, K=context, V=context)
+          
+          input_sig = torch.sigmoid(input)
+          att_sig = 1 - input_sig
+          G_input = torch.where(input_sig > self.threshold, att_sig, 0)
+          G_att = torch.where(att_sig > self.threshold, att_sig, 0)
+
+          input = G_input * input + G_att * att
+          input = self.layer_norm(input)
+          input = input.transpose(1, 2)
+        
+        return input
+
 
 class GatedAttention(nn.Module):
   '''
