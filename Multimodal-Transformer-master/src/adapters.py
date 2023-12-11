@@ -200,8 +200,8 @@ class ContextGateEarlyAdaptor(nn.Module):
         
         self.adapter = Adaptor(ndim, rank = rank)
         if context:
-          self.attention = Multiheadattention(num_attention_heads=4, hidden_dim=ndim)
-          self.layer_norm = nn.LayerNorm(ndim)
+          self.attention = Multiheadattention(num_attention_heads=5, hidden_dim=30)
+          self.layer_norm = nn.LayerNorm(30)
           self.threshold = threshold # the threshold of the gate
         
 
@@ -211,8 +211,10 @@ class ContextGateEarlyAdaptor(nn.Module):
         input = self.adapter(input)
 
         if context != None:
+          context = context.transpose(1, 2) 
           context = self.adapter(context).transpose(1,2)
           input =  input.transpose(1, 2)
+         # import pdb; pdb.set_trace()
           att = self.attention(Q=input, K=context, V=context)
           
           input_sig = torch.sigmoid(input)
@@ -220,6 +222,7 @@ class ContextGateEarlyAdaptor(nn.Module):
           G_input = torch.where(input_sig > self.threshold, att_sig, 0)
           G_att = torch.where(att_sig > self.threshold, att_sig, 0)
 
+          #import pdb; pdb.set_trace()
           input = G_input * input + G_att * att
           input = self.layer_norm(input)
           input = input.transpose(1, 2)

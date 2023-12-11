@@ -29,6 +29,8 @@ class MULTModel(nn.Module):
 
         combined_dim = self.d_l + self.d_a + self.d_v
 
+       #import pdb; pdb.set_trace()
+    
         self.partial_mode = self.lonly + self.aonly + self.vonly
         if self.partial_mode == 1:
             combined_dim = 2 * self.d_l   # assuming d_l == d_a == d_v
@@ -41,7 +43,6 @@ class MULTModel(nn.Module):
         self.proj_l = nn.Conv1d(self.orig_d_l, self.d_l, kernel_size=1, padding=0, bias=False)
         self.proj_a = nn.Conv1d(self.orig_d_a, self.d_a, kernel_size=1, padding=0, bias=False)
         self.proj_v = nn.Conv1d(self.orig_d_v, self.d_v, kernel_size=1, padding=0, bias=False)
-        
 
         # 2. Crossmodal Attentions
         if self.lonly:
@@ -90,22 +91,34 @@ class MULTModel(nn.Module):
                                   embed_dropout=self.embed_dropout,
                                   attn_mask=self.attn_mask)
             
-    def forward(self, x_l, x_a, x_v):
+    def forward(self, x_l, x_a, x_v, context_t = None, context_v = None):
         """
         text, audio, and vision should have dimension [batch_size, seq_len, n_features]
         """
         x_l = F.dropout(x_l.transpose(1, 2), p=self.embed_dropout, training=self.training)
         x_a = x_a.transpose(1, 2)
         x_v = x_v.transpose(1, 2)
+        #x_v = F.dropout(x_v.transpose(1, 2), p=self.embed_dropout, training=self.training)
        
         # Project the textual/visual/audio features
-        proj_x_l = x_l if self.orig_d_l == self.d_l else self.proj_l(x_l)
+        #import pdb; pdb.set_trace()
+        #proj_x_l = x_l if self.orig_d_l == self.d_l else self.proj_l(x_l, context = context_t)
+        #import pdb; pdb.set_trace()
+        #context_t = None
+        proj_x_l = x_l if self.orig_d_l == self.d_l else self.proj_l(x_l, context = context_t)
         proj_x_a = x_a if self.orig_d_a == self.d_a else self.proj_a(x_a)
-        proj_x_v = x_v if self.orig_d_v == self.d_v else self.proj_v(x_v)
+        #proj_x_v = x_v if self.orig_d_v == self.d_v else self.proj_v(x_v)
+        #import pdb; pdb.set_trace()
+        #context_v = None
+        proj_x_v = x_v if self.orig_d_v == self.d_v else self.proj_v(x_v, context = context_v)
+        
         proj_x_a = proj_x_a.permute(2, 0, 1)
         proj_x_v = proj_x_v.permute(2, 0, 1)
         proj_x_l = proj_x_l.permute(2, 0, 1)
 
+        #import pdb; pdb.set_trace()
+
+        #self.lonly = True
         if self.lonly:
             # (V,A) --> L
             h_l_with_as = self.trans_l_with_a(proj_x_l, proj_x_a, proj_x_a)    # Dimension (L, N, d_l)
@@ -116,6 +129,7 @@ class MULTModel(nn.Module):
                 h_ls = h_ls[0]
             last_h_l = last_hs = h_ls[-1]   # Take the last output for prediction
 
+        #self.aonly = False
         if self.aonly:
             # (L,V) --> A
             h_a_with_ls = self.trans_a_with_l(proj_x_a, proj_x_l, proj_x_l)
@@ -126,6 +140,8 @@ class MULTModel(nn.Module):
                 h_as = h_as[0]
             last_h_a = last_hs = h_as[-1]
 
+        #self.vonly = False
+        #self.vonly = False
         if self.vonly:
             # (L,A) --> V
             h_v_with_ls = self.trans_v_with_l(proj_x_v, proj_x_l, proj_x_l)
@@ -136,11 +152,13 @@ class MULTModel(nn.Module):
                 h_vs = h_vs[0]
             last_h_v = last_hs = h_vs[-1]
         
+        #self.partial_mode = 1
         if self.partial_mode == 3:
             last_hs = torch.cat([last_h_l, last_h_a, last_h_v], dim=1)
         
         # A residual block
-        last_hs_proj = self.proj2(F.dropout(F.relu(self.proj1(last_hs)), p=self.out_dropout, training=self.training))
+        last_hs_proj = self.proj1(last_hs)
+        last_hs_proj = self.proj2(F.dropout(F.relu(last_hs_proj), p=self.out_dropout, training=self.training))
         last_hs_proj += last_hs
         
         output = self.out_layer(last_hs_proj)

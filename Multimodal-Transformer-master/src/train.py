@@ -18,7 +18,7 @@ from sklearn.metrics import precision_recall_fscore_support
 from sklearn.metrics import accuracy_score, f1_score
 from src.eval_metrics import *
 
-from src.adapters import Adaptor, ContextGateAdaptor, ContextConcatAdaptor, GatedAttention
+from src.adapters import Adaptor, ContextGateAdaptor, ContextConcatAdaptor, GatedAttention, ContextGateEarlyAdaptor
 ####################################################################
 #
 # Construct the model and the CTC module (which may not be needed)
@@ -36,7 +36,7 @@ def initiate(hyp_params, train_loader, valid_loader, test_loader):
     if hyp_params.use_cuda:
         model = model.cuda()
 
-    fine_tune = True
+    fine_tune = False
     freeze = True
     #import pdb; pdb.set_trace()
 
@@ -50,9 +50,10 @@ def initiate(hyp_params, train_loader, valid_loader, test_loader):
         
 
         # finetune the output layer 
-        model.proj1 = nn.Linear(in_features=180, out_features=180, bias=True)    # hard code here (to be fixed !)
-        model.proj2 = nn.Linear(in_features=180, out_features=180, bias=True)
-        model.out_layer = nn.Linear(in_features=180, out_features=1, bias=True)
+        feature_dim = 180
+        model.proj1 = nn.Linear(in_features=feature_dim, out_features=feature_dim, bias=True)    # hard code here (to be fixed !)
+        model.proj2 = nn.Linear(in_features=feature_dim, out_features=feature_dim, bias=True)
+        model.out_layer = nn.Linear(in_features=feature_dim, out_features=1, bias=True)
 
         # update the conv1d with "LoRA"
 
@@ -60,21 +61,38 @@ def initiate(hyp_params, train_loader, valid_loader, test_loader):
         #import pdb; pdb.set_trace()
         # adaptor_v = Adaptor(ndim = hyp_params.orig_d_v)
         # adaptor_a = Adaptor(ndim = hyp_params.orig_d_a)
+        
         # adaptor_l = Adaptor(ndim = hyp_params.orig_d_l)
-        #adaptor_v = Adaptor(ndim = hyp_params.orig_d_v)
-        adaptor_v = ContextGateAdaptor(ndim = hyp_params.orig_d_v, context=True, threshold = 0.25)
-        adaptor_a = Adaptor(ndim = hyp_params.orig_d_a)
+        # #adaptor_v = Adaptor(ndim = hyp_params.orig_d_v)
+        # #adaptor_v = ContextGateAdaptor(ndim = hyp_params.orig_d_v, context=True, threshold = 0.4)
+        # adaptor_a = Adaptor(ndim = hyp_params.orig_d_a)
+        # adaptor_v = Adaptor(ndim = hyp_params.orig_d_v)
         #adaptor_l = Adaptor(ndim = hyp_params.orig_d_l)
-        adaptor_l = ContextGateAdaptor(ndim = hyp_params.orig_d_l, context=True, threshold = 0.1)
-       # import pdb; pdb.set_trace()
+        #adaptor_l = ContextGateAdaptor(ndim = hyp_params.orig_d_l, context=True, threshold = 0.4)
+        #import pdb; pdb.set_trace()
+        #adaptor_v = ContextGateEarlyAdaptor(ndim = hyp_params.orig_d_v, context=True, threshold = 0.9)       # import pdb; pdb.set_trace()
+        #adaptor_l = ContextGateEarlyAdaptor(ndim = hyp_params.orig_d_l, context=True, threshold = 0.5)
         #adaptor_l.adapter = adaptor_l_init
+        adaptor_v = Adaptor(ndim = hyp_params.orig_d_v)
+        adaptor_a = Adaptor(ndim = hyp_params.orig_d_a) 
+        adaptor_l = Adaptor(ndim = hyp_params.orig_d_l)    
 
+        print('pass')
+
+           
+        
+        
+        #adaptor_v = ContextGateAdaptor(ndim = hyp_params.orig_d_v, context=True, threshold = 0.65)
+        #adaptor_a = Adaptor(ndim = hyp_params.orig_d_a)
+        
 
         model.proj_v = adaptor_v
         model.proj_a = adaptor_a
         model.proj_l = adaptor_l
-        #model.trans_l_mem = GatedAttention(ndim = model.d_l*2, threshold = 0.1, orig_self_attn = model.trans_l_mem)#replace with gated attn
-        #model.trans_v_mem = GatedAttention(ndim = model.d_v*2, threshold = 0.65, orig_self_attn = model.trans_v_mem)#replace with gated attn
+
+        import pdb; pdb.set_trace()
+       # model.trans_l_mem = GatedAttention(ndim = model.d_l*2, threshold = 0.1, orig_self_attn = model.trans_l_mem)#replace with gated attn
+       # model.trans_v_mem = GatedAttention(ndim = model.d_v*2, threshold = 0.65, orig_self_attn = model.trans_v_mem)#replace with gated attn
     
     
 
@@ -196,7 +214,10 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
                 for i in range(batch_chunk):
                     text_i, audio_i, vision_i = text_chunks[i], audio_chunks[i], vision_chunks[i]
                     eval_attr_i = eval_attr_chunks[i]
-                    preds_i, hiddens_i = net(text_i, audio_i, vision_i, context_t, context_v)
+                    context_t = None
+                    context_v = None
+                    #preds_i, hiddens_i = net(text_i, audio_i, vision_i, context_t, context_v)
+                    preds_i, hiddens_i = net(text_i, audio_i, vision_i)
                     
                     if hyp_params.dataset == 'iemocap':
                         preds_i = preds_i.view(-1, 2)
@@ -209,7 +230,10 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
             else:
                 #context_t = None
                 #import pdb; pdb.set_trace()
-                preds, hiddens = net(text, audio, vision, context_t, context_v)
+                context_t = None
+                context_v = None
+                #preds, hiddens = net(text, audio, vision, context_t, context_v)
+                preds, hiddens = net(text, audio, vision)
                 if hyp_params.dataset == 'iemocap':
                     preds = preds.view(-1, 2)
                     eval_attr = eval_attr.view(-1)
@@ -274,8 +298,11 @@ def train_model(settings, hyp_params, train_loader, valid_loader, test_loader):
                     vision, _ = ctc_v2l_net(vision)   # vision aligned to text
                 
                 net = nn.DataParallel(model) if batch_size > 10 else model
-                #context_t = None
-                preds, _ = net(text, audio, vision, context_t, context_v)
+                context_t = None
+                context_v = None
+                #import pdb; pdb.set_trace()
+                #preds, _ = net(text, audio, vision, context_t, context_v)
+                preds, _ = net(text, audio, vision)
                 if hyp_params.dataset == 'iemocap':
                     preds = preds.view(-1, 2)
                     eval_attr = eval_attr.view(-1)
