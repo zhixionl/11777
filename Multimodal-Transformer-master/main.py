@@ -81,6 +81,7 @@ torch.manual_seed(args.seed)
 dataset = str.lower(args.dataset.strip())
 valid_partial_mode = args.lonly + args.vonly + args.aonly
 
+#import pdb; pdb.set_trace()
 if valid_partial_mode == 0:
     args.lonly = args.vonly = args.aonly = True
 elif valid_partial_mode != 1:
